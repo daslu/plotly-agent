@@ -6,3 +6,12 @@ It uses Plotly's JSON schema for validation.
 
 It was created in a conversation with `o3-mini-high` with some manual corrections.
 
+## Usage
+
+```bash
+clojure -M -m plotly.agent
+```
+
+Then browse `http://localhost:3000`.
+
+
