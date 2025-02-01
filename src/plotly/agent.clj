@@ -324,7 +324,8 @@
    (-main)
    Then open http://localhost:3000 in your browser."
   [& args]
-  (run-jetty app {:port 3000 :join? false}))
+  (run-jetty app {:port 3000 :join? false})
+  (println "\nBrowse http://localhost:3000 ."))
 (comment
   ;; Example call to start the server:
   (-main))
