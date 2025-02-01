@@ -225,9 +225,13 @@
   [:div
    [:form {:action "/generate" :method "post"}
     [:div
-     [:label "Initial Data (JSON):"]
+     [:label "Initial Data:"]
      [:br]
-     [:textarea {:name "data" :rows 4 :cols 50 :placeholder "{\"data\": [{\"x\": [1,2,3], \"y\": [4,5,6], \"type\": \"scatter\"}], \"layout\": {\"title\": \"Line Chart\"}}"}]]
+     [:textarea {:name "data"
+                 :rows 4
+                 :cols 50
+                 :placeholder (pr-str {:x [1 2 3 4]
+                                       :y [1 4 9 16]})}]]
     [:div
      [:label "Plot Instructions:"]
      [:br]
@@ -248,7 +252,7 @@
     [:div
      [:label "Update Instruction:"]
      [:br]
-     [:textarea {:name "instruction" :rows 4 :cols 50 :placeholder "e.g., Change the marker color."}]]
+     [:textarea {:name "instruction" :rows 4 :cols 50 :placeholder "e.g., Change the color to brown."}]]
     [:div [:input {:type "submit" :value "Update Plot"}]]]])
 (comment
   ;; Example call:
