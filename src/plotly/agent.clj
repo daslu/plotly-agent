@@ -32,7 +32,6 @@
   ;; Example: Print the API URL.
   (println openai-api-url))
 
-
 ;; -----------------------------------------------------------------------------
 ;; JSON Response Parsing and Validation
 ;; -----------------------------------------------------------------------------
@@ -40,7 +39,7 @@
 (defn parse-json-response
   "Parses the string `s` as JSON and returns the resulting Clojure map (with keyword keys).
    If parsing fails, returns the original string.
-
+   
    Example:
    (parse-json-response \"{\\\"data\\\": [1,2,3], \\\"layout\\\": {\\\"title\\\": \\\"Line Chart\\\"}}\")"
   [s]
@@ -67,7 +66,7 @@
 (defn validate-plot-spec
   "Validates the given plot-spec map against the official Plotly JSON schema.
    Returns true if valid; otherwise, prints the validation error and returns false.
-
+   
    Example:
    (validate-plot-spec {:data [{:x [1 2 3] :y [4 5 6] :type \"scatter\"}]
                          :layout {:title \"Line Chart\"}})"
@@ -85,7 +84,6 @@
   (validate-plot-spec {:data [{:x [1 2 3] :y [4 5 6] :type "scatter"}]
                        :layout {:title "Line Chart"}}))
 
-
 ;; -----------------------------------------------------------------------------
 ;; chat-completion
 ;; -----------------------------------------------------------------------------
@@ -93,7 +91,7 @@
 (defn chat-completion
   "Sends the conversation history (a vector of message maps) to the OpenAI API
    using GPT‑4 and returns the assistant’s reply parsed as JSON.
-
+   
    Example:
    (chat-completion [{:role \"system\" :content \"You output JSON only.\"}
                      {:role \"user\" :content \"Output a JSON object: {\\\"data\\\": [{\\\"x\\\": [1,2,3], \\\"y\\\": [4,5,6], \\\"type\\\": \\\"scatter\\\"}], \\\"layout\\\": {\\\"title\\\": \\\"Line Chart\\\"}}\"}])"
@@ -127,6 +125,7 @@
                  "specification as a JSON object that conforms to the official Plotly JSON schema. "
                  "Return only a valid JSON object with no additional commentary or markdown formatting.")})
 
+;; The conversation is reset for each new command.
 (def conversation
   "An atom holding the current conversation history for a command.
    (Each new submission resets this to the initial system message.)"
@@ -137,7 +136,7 @@
 
 (def plot-history
   "An atom holding the history of generated plots.
-   Each entry is a map with keys :command and :plot-spec."
+   Each entry is a map with keys :data, :instruction, and :plot-spec."
   (atom []))
 (comment
   ;; Example: Print the plot history.
@@ -148,26 +147,27 @@
 ;; -----------------------------------------------------------------------------
 
 (defn process-command
-  "Resets the conversation, sends the user command to the LLM, validates the output,
-   and, if valid, adds a new plot to the plot-history.
-   Returns the new plot entry (a map with :command and :plot-spec) or an error string.
-
+  "Resets the conversation, sends the user data and instructions to the LLM,
+   validates the output, and if valid, adds a new plot to the plot-history.
+   Returns the new plot entry (a map with :data, :instruction, and :plot-spec)
+   or an error string.
+   
    Example:
-   (process-command \"{:x [1 2 3] :y [4 5 6]} Create a scatter plot.\")"
-  [command]
+   (process-command \"{:x [1 2 3] :y [4 5 6]}\" \"Create a scatter plot.\")"
+  [data instruction]
   (reset! conversation [initial-system-message])
-  (swap! conversation conj {:role "user" :content command})
-  (let [plot-spec (chat-completion @conversation)
-        valid?    (validate-plot-spec plot-spec)]
-    (if valid?
-      (let [entry {:command command :plot-spec plot-spec}]
-        (swap! plot-history conj entry)
-        entry)
-      (str "Invalid plot specification generated: " plot-spec))))
+  (let [command (str "Data: " data "\nInstructions: " instruction)]
+    (swap! conversation conj {:role "user" :content command})
+    (let [plot-spec (chat-completion @conversation)
+          valid?    (validate-plot-spec plot-spec)]
+      (if valid?
+        (let [entry {:data data :instruction instruction :plot-spec plot-spec}]
+          (swap! plot-history conj entry)
+          entry)
+        (str "Invalid plot specification generated: " plot-spec)))))
 (comment
   ;; Example call:
-  (process-command "{:x [1 2 3] :y [4 5 6]} Create a scatter plot."))
-
+  (process-command "{:x [1 2 3] :y [4 5 6]}" "Create a scatter plot."))
 
 ;; -----------------------------------------------------------------------------
 ;; Render a Single Plot Entry
@@ -175,19 +175,21 @@
 
 (defn render-plot-entry
   "Renders a single plot entry as HTML.
-   Each entry shows the command used and renders the Plotly plot with a collapsible JSON code block.
-   A unique container ID is generated based on the index.
-
+   Each entry shows the data and instructions used and renders the Plotly plot with
+   a collapsible JSON code block. A unique container ID is generated based on the index.
+   
    Example:
-   (render-plot-entry {:command \"{:x [1 2 3] :y [4 5 6]} Create a scatter plot.\"
-                       :plot-spec {:data [{:x [1 2 3] :y [4 5 6] :type \"scatter\"}],
-                                   :layout {:title \"Line Chart\"}}})"
+   (render-plot-entry 0 {:data \"{:x [1 2 3] :y [4 5 6]}\" 
+                         :instruction \"Create a scatter plot.\"
+                         :plot-spec {:data [{:x [1 2 3] :y [4 5 6] :type \"scatter\"}],
+                                     :layout {:title \"Line Chart\"}}})"
   [idx entry]
   (let [container-id (str "plot-" idx)
         plot-spec (:plot-spec entry)]
     [:div {:style "margin-bottom: 2em; border-bottom: 1px solid #ccc; padding-bottom: 1em;"}
      [:h3 (str "Plot " (inc idx))]
-     [:p [:strong "Command: "] (:command entry)]
+     [:p [:strong "Data: "] (:data entry)]
+     [:p [:strong "Instruction: "] (:instruction entry)]
      ;; Container for the Plotly plot
      [:div {:id container-id :style "width:100%;height:400px; margin:1em 0;"}]
      ;; Collapsible JSON code block
@@ -199,8 +201,9 @@
                    "Plotly.newPlot('" container-id "', plotSpec.data, plotSpec.layout);")]]))
 (comment
   ;; Example call:
-  (render-plot-entry 0 {:command "{:x [1 2 3] :y [4 5 6]} Create a scatter plot."
-                        :plot-spec {:data [{:x [1 2 3] :y [4 5 6] :type "scatter"}],
+  (render-plot-entry 0 {:data "{:x [1 2 3] :y [4 5 6]}"
+                        :instruction "Create a scatter plot."
+                        :plot-spec {:data [{:x [1 2 3] :y [4 5 6] :type "scatter"}]
                                     :layout {:title "Line Chart"}}}))
 
 ;; -----------------------------------------------------------------------------
@@ -210,7 +213,7 @@
 (defn render-gallery
   "Renders the gallery of all generated plots.
    Each plot is rendered using render-plot-entry.
-
+   
    Example:
    (render-gallery)"
   []
@@ -228,8 +231,8 @@
 ;; -----------------------------------------------------------------------------
 
 (defn render-command-form
-  "Returns the HTML form for entering a plot command.
-   Uses HTMX for asynchronous submission.
+  "Returns the HTML form for entering the plot data and instructions.
+   Uses HTMX for asynchronous submission and includes default values.
    
    Example:
    (render-command-form)"
@@ -239,11 +242,14 @@
           :hx-indicator "#loading"
           :method "post"}
    [:div
-    [:label "Enter Plot Command:"]
+    [:label "Data (EDN):"]
     [:br]
-    [:textarea {:name "command"
-                :rows 4
-                :placeholder "Enter EDN data and instructions, e.g. {:x [1 2 3] :y [4 5 6]} Create a scatter plot."}]]
+    ;; The default value is provided as the initial content of the textarea.
+    [:textarea {:name "data" :rows 4} "{:x [1 2 3] :y [4 5 6]}"]]
+   [:div
+    [:label "Instructions:"]
+    [:br]
+    [:textarea {:name "instruction" :rows 4} "Create a scatter plot."]]
    [:div
     [:input {:type "submit" :value "Submit Command" :style "margin-top: 1em;"}]]])
 (comment
@@ -296,8 +302,9 @@
                (render-command-form)
                [:div#gallery (render-gallery)]))
   (POST "/submit" {params :params}
-        (let [command (get params "command")]
-          (process-command command)
+        (let [data        (get params "data")
+              instruction (get params "instruction")]
+          (process-command data instruction)
           ;; Return the updated gallery (this will replace the #gallery div via HTMX)
           (html5 [:body (render-gallery)])))
   (route/not-found "Page not found"))
@@ -326,4 +333,3 @@
 (comment
   ;; Example call to start the server:
   (-main))
-
