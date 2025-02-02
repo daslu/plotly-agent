@@ -181,7 +181,7 @@
         (str "Invalid plot specification generated: " plot-spec)))))
 (comment
   ;; Example call:
-  (generate-initial-plot "{\"data\": [{\"x\": [1,2,3], \"y\": [4,5,6], \"type\": \"scatter\"}], \"layout\": {\"title\": \"Line Chart\"}}"
+  (generate-initial-plot "{:x [1 2 3] :y [4 5 6]}"
                          "Create a line chart."))
 
 ;; -----------------------------------------------------------------------------
@@ -261,11 +261,11 @@
           :hx-indicator "#loading"
           :method "post"}
    [:div
-    [:label "Initial Data (JSON):"]
+    [:label "Initial Data (EDN):"]
     [:br]
     [:textarea {:name "data"
                 :rows 4
-                :placeholder "{\"data\": [{\"x\": [1,2,3], \"y\": [4,5,6], \"type\": \"scatter\"}], \"layout\": {\"title\": \"Line Chart\"}}"}]]
+                :placeholder "{:x [1 2 3] :y [4 5 6]}"}]]
    [:div
     [:label "Plot Instructions:"]
     [:br]
@@ -322,6 +322,23 @@
   (render-result {:data [{:x [1,2,3], :y [4,5,6], :type "scatter"}],
                   :layout {:title "Line Chart"}}))
 
+(defn render-conversation-history
+  "Renders the conversation history as a collapsible HTML block.
+   
+   Example:
+   (render-conversation-history)"
+  []
+  (let [msgs @conversation]
+    [:details {:open true :style "margin: 1em 0;"}
+     [:summary "Show Conversation History"]
+     (for [{:keys [role content]} msgs]
+       [:div {:style "margin: 0.5em 0; padding: 0.5em; border-bottom: 1px solid #ddd;"}
+        [:strong (str role ": ")]
+        [:span content]])]))
+(comment
+  ;; Example call:
+  (render-conversation-history))
+
 (defn render-conversation-history-component
   "Renders the conversation history along with a button to refresh it via HTMX.
    The history is shown in a collapsible block.
@@ -376,6 +393,7 @@
 
 (def app
   "The Ring application wrapped with parameters middleware.
+   
    Example:
    (app)"
   (wrap-params app-routes))
@@ -389,6 +407,7 @@
 
 (defn -main
   "Starts the web server on port 3000.
+   
    Example:
    (-main)
    Then open http://localhost:3000 in your browser."
