@@ -40,7 +40,7 @@
 (defn parse-json-response
   "Parses the string `s` as JSON and returns the resulting Clojure map (with keyword keys).
    If parsing fails, returns the original string.
-   
+
    Example:
    (parse-json-response \"{\\\"data\\\": [1,2,3], \\\"layout\\\": {\\\"title\\\": \\\"Line Chart\\\"}}\")"
   [s]
@@ -67,7 +67,7 @@
 (defn validate-plot-spec
   "Validates the given plot-spec map against the official Plotly JSON schema.
    Returns true if valid; otherwise, prints the validation error and returns false.
-   
+
    Example:
    (validate-plot-spec {:data [{:x [1 2 3] :y [4 5 6] :type \"scatter\"}]
                          :layout {:title \"Line Chart\"}})"
@@ -93,7 +93,7 @@
 (defn chat-completion
   "Sends the conversation history (a vector of message maps) to the OpenAI API
    using GPT‑4 and returns the assistant’s reply parsed as JSON.
-   
+
    Example:
    (chat-completion [{:role \"system\" :content \"You output JSON only.\"}
                      {:role \"user\" :content \"Output a JSON object: {\\\"data\\\": [{\\\"x\\\": [1,2,3], \\\"y\\\": [4,5,6], \\\"type\\\": \\\"scatter\\\"}], \\\"layout\\\": {\\\"title\\\": \\\"Line Chart\\\"}}\"}])"
@@ -116,103 +116,142 @@
                     {:role "user" :content "Output a JSON object: {\"data\": [{\"x\": [1,2,3], \"y\": [4,5,6], \"type\": \"scatter\"}], \"layout\": {\"title\": \"Line Chart\"}}"}]))
 
 ;; -----------------------------------------------------------------------------
-;; Conversation Atom
+;; Conversation & Plot History
 ;; -----------------------------------------------------------------------------
+
+(def initial-system-message
+  "The initial system message for every plot command."
+  {:role "system"
+   :content (str "You are an AI agent that generates Plotly plots in JSON format. "
+                 "Given an EDN data structure and plot instructions, produce a valid Plotly plot "
+                 "specification as a JSON object that conforms to the official Plotly JSON schema. "
+                 "Return only a valid JSON object with no additional commentary or markdown formatting.")})
 
 (def conversation
-  "An atom holding the conversation history.
-   The system message instructs the AI to output a pure JSON object that conforms
-   to the official Plotly JSON schema (with no extra commentary)."
-  (atom
-   [{:role "system"
-     :content (str "You are an AI agent that generates Plotly plots in JSON format. "
-                   "Given data and textual instructions, produce a valid Plotly plot "
-                   "specification as a JSON object that conforms to the official Plotly JSON schema. "
-                   "Return only a valid JSON object with no additional commentary or markdown formatting.")}]))
+  "An atom holding the current conversation history for a command.
+   (Each new submission resets this to the initial system message.)"
+  (atom [initial-system-message]))
 (comment
-  ;; Example: Print the current conversation history.
+  ;; Example: Print the current conversation.
   (println @conversation))
 
-;; -----------------------------------------------------------------------------
-;; render-conversation-history
-;; -----------------------------------------------------------------------------
-
-(defn render-conversation-history
-  "Renders the conversation history as a collapsible HTML block.
-   
-   Example:
-   (render-conversation-history)"
-  []
-  (let [msgs @conversation]
-    [:details {:open true :style "margin: 1em 0;"}
-     [:summary "Show Conversation History"]
-     (for [{:keys [role content]} msgs]
-       [:div {:style "margin: 0.5em 0; padding: 0.5em; border-bottom: 1px solid #ddd;"}
-        [:strong (str role ": ")]
-        [:span content]])]))
+(def plot-history
+  "An atom holding the history of generated plots.
+   Each entry is a map with keys :command and :plot-spec."
+  (atom []))
 (comment
-  ;; Example call:
-  (render-conversation-history))
+  ;; Example: Print the plot history.
+  (println @plot-history))
 
 ;; -----------------------------------------------------------------------------
-;; generate-initial-plot
+;; Process Command
 ;; -----------------------------------------------------------------------------
 
-(defn generate-initial-plot
-  "Adds the initial user message (data and instructions) to the conversation,
-   calls the API, validates the output against the official Plotly JSON schema,
-   and returns the generated plot specification as a map.
-   
-   Parameters:
-   - data: The data (in JSON, EDN, or plain text) for the plot.
-   - instruction: A textual instruction describing the desired plot.
-   
+(defn process-command
+  "Resets the conversation, sends the user command to the LLM, validates the output,
+   and, if valid, adds a new plot to the plot-history.
+   Returns the new plot entry (a map with :command and :plot-spec) or an error string.
+
    Example:
-   (generate-initial-plot \"{\\\"data\\\":[{\\\"x\\\": [1,2,3], \\\"y\\\": [4,5,6], \\\"type\\\": \\\"scatter\\\"}], \\\"layout\\\": {\\\"title\\\": \\\"Line Chart\\\"}}\" \"Create a line chart.\")"
-  [data instruction]
-  (let [user-message (str "Data: " data "\nInstructions: " instruction)]
-    (swap! conversation conj {:role "user" :content user-message})
-    (let [plot-spec (chat-completion @conversation)
-          valid?    (validate-plot-spec plot-spec)]
-      (if valid?
-        (do
-          (swap! conversation conj {:role "assistant" :content (json/generate-string plot-spec)})
-          plot-spec)
-        (str "Invalid plot specification generated: " plot-spec)))))
-(comment
-  ;; Example call:
-  (generate-initial-plot "{:x [1 2 3] :y [4 5 6]}"
-                         "Create a line chart."))
-
-;; -----------------------------------------------------------------------------
-;; update-plot
-;; -----------------------------------------------------------------------------
-
-(defn update-plot
-  "Adds a follow‑up instruction to the conversation, calls the API,
-   validates the output against the official Plotly JSON schema, and returns
-   the updated plot specification as a map.
-   
-   Parameter:
-   - instruction: A textual instruction for modifying the plot.
-   
-   Example:
-   (update-plot \"Please change the marker color to blue.\")"
-  [instruction]
-  (swap! conversation conj {:role "user" :content instruction})
+   (process-command \"{:x [1 2 3] :y [4 5 6]} Create a scatter plot.\")"
+  [command]
+  (reset! conversation [initial-system-message])
+  (swap! conversation conj {:role "user" :content command})
   (let [plot-spec (chat-completion @conversation)
         valid?    (validate-plot-spec plot-spec)]
     (if valid?
-      (do
-        (swap! conversation conj {:role "assistant" :content (json/generate-string plot-spec)})
-        plot-spec)
+      (let [entry {:command command :plot-spec plot-spec}]
+        (swap! plot-history conj entry)
+        entry)
       (str "Invalid plot specification generated: " plot-spec))))
 (comment
   ;; Example call:
-  (update-plot "Please change the marker color to blue."))
+  (process-command "{:x [1 2 3] :y [4 5 6]} Create a scatter plot."))
+
 
 ;; -----------------------------------------------------------------------------
-;; Web UI Helpers (using Hiccup and HTMX)
+;; Render a Single Plot Entry
+;; -----------------------------------------------------------------------------
+
+(defn render-plot-entry
+  "Renders a single plot entry as HTML.
+   Each entry shows the command used and renders the Plotly plot with a collapsible JSON code block.
+   A unique container ID is generated based on the index.
+
+   Example:
+   (render-plot-entry {:command \"{:x [1 2 3] :y [4 5 6]} Create a scatter plot.\"
+                       :plot-spec {:data [{:x [1 2 3] :y [4 5 6] :type \"scatter\"}],
+                                   :layout {:title \"Line Chart\"}}})"
+  [idx entry]
+  (let [container-id (str "plot-" idx)
+        plot-spec (:plot-spec entry)]
+    [:div {:style "margin-bottom: 2em; border-bottom: 1px solid #ccc; padding-bottom: 1em;"}
+     [:h3 (str "Plot " (inc idx))]
+     [:p [:strong "Command: "] (:command entry)]
+     ;; Container for the Plotly plot
+     [:div {:id container-id :style "width:100%;height:400px; margin:1em 0;"}]
+     ;; Collapsible JSON code block
+     [:details
+      [:summary "Show/Hide JSON Specification"]
+      [:pre (json/generate-string plot-spec {:pretty true})]]
+     ;; Inline JavaScript to render the plot using Plotly in this container
+     [:script (str "var plotSpec = " (json/generate-string plot-spec) ";"
+                   "Plotly.newPlot('" container-id "', plotSpec.data, plotSpec.layout);")]]))
+(comment
+  ;; Example call:
+  (render-plot-entry 0 {:command "{:x [1 2 3] :y [4 5 6]} Create a scatter plot."
+                        :plot-spec {:data [{:x [1 2 3] :y [4 5 6] :type "scatter"}],
+                                    :layout {:title "Line Chart"}}}))
+
+;; -----------------------------------------------------------------------------
+;; Render Gallery
+;; -----------------------------------------------------------------------------
+
+(defn render-gallery
+  "Renders the gallery of all generated plots.
+   Each plot is rendered using render-plot-entry.
+
+   Example:
+   (render-gallery)"
+  []
+  (if (empty? @plot-history)
+    [:div "No plots generated yet."]
+    [:div
+     (for [[idx entry] (map-indexed vector @plot-history)]
+       (render-plot-entry idx entry))]))
+(comment
+  ;; Example call:
+  (render-gallery))
+
+;; -----------------------------------------------------------------------------
+;; Render Command Form
+;; -----------------------------------------------------------------------------
+
+(defn render-command-form
+  "Returns the HTML form for entering a plot command.
+   Uses HTMX for asynchronous submission.
+   
+   Example:
+   (render-command-form)"
+  []
+  [:form {:hx-post "/submit"
+          :hx-target "#gallery"
+          :hx-indicator "#loading"
+          :method "post"}
+   [:div
+    [:label "Enter Plot Command:"]
+    [:br]
+    [:textarea {:name "command"
+                :rows 4
+                :placeholder "Enter EDN data and instructions, e.g. {:x [1 2 3] :y [4 5 6]} Create a scatter plot."}]]
+   [:div
+    [:input {:type "submit" :value "Submit Command" :style "margin-top: 1em;"}]]])
+(comment
+  ;; Example call:
+  (render-command-form))
+
+;; -----------------------------------------------------------------------------
+;; Layout (using Hiccup and HTMX)
 ;; -----------------------------------------------------------------------------
 
 (defn layout
@@ -236,8 +275,6 @@
       pre { background-color: #f4f4f4; padding: 1em; overflow: auto; }
       details summary { cursor: pointer; font-weight: bold; }
       .spinner { display: none; }
-      .message { margin: 0.5em 0; padding: 0.5em; border-bottom: 1px solid #ddd; }
-      .message strong { color: #333; }
     "]]
    [:body
     [:div.container
@@ -249,113 +286,6 @@
   ;; Example call:
   (layout "Test Page" [:p "Hello world!"]))
 
-(defn render-initial-form
-  "Returns the HTML form for entering initial data and plot instructions.
-   Uses HTMX attributes for asynchronous submission.
-   
-   Example:
-   (render-initial-form)"
-  []
-  [:form {:hx-post "/generate"
-          :hx-target "#result"
-          :hx-indicator "#loading"
-          :method "post"}
-   [:div
-    [:label "Initial Data (EDN):"]
-    [:br]
-    [:textarea {:name "data"
-                :rows 4
-                :placeholder "{:x [1 2 3] :y [4 5 6]}"}]]
-   [:div
-    [:label "Plot Instructions:"]
-    [:br]
-    [:textarea {:name "instruction" :rows 4 :placeholder "Create a line chart."}]]
-   [:div
-    [:input {:type "submit" :value "Generate Plot" :style "margin-top: 1em;"}]]])
-(comment
-  ;; Example call:
-  (render-initial-form))
-
-(defn render-update-form
-  "Returns the HTML form for entering follow‑up instructions.
-   Uses HTMX attributes for asynchronous submission.
-   
-   Example:
-   (render-update-form)"
-  []
-  [:form {:hx-post "/update"
-          :hx-target "#result"
-          :hx-indicator "#loading"
-          :method "post"}
-   [:div
-    [:label "Update Instruction:"]
-    [:br]
-    [:textarea {:name "instruction" :rows 4 :placeholder "e.g., Change the marker color."}]]
-   [:div
-    [:input {:type "submit" :value "Update Plot" :style "margin-top: 1em;"}]]])
-(comment
-  ;; Example call:
-  (render-update-form))
-
-(defn render-result
-  "Returns HTML displaying the generated Plotly plot specification (as JSON),
-   renders the Plotly plot, and includes a collapsible code block for the JSON.
-   
-   Example:
-   (render-result {:data [{:x [1,2,3], :y [4,5,6], :type \"scatter\"}],
-                   :layout {:title \"Line Chart\"}})"
-  [plot-spec]
-  (let [plot-json (json/generate-string plot-spec)]
-    [:div
-     [:h2 "Generated Plotly Plot Specification (JSON)"]
-     ;; Collapsible code block
-     [:details
-      [:summary "Show/Hide JSON"]
-      [:pre (json/generate-string plot-spec {:pretty true})]]
-     ;; Container for the Plotly plot
-     [:div {:id "plot" :style "width:100%;height:400px; margin:1em 0;"}]
-     ;; Inline JavaScript to render the plot using Plotly
-     [:script (str "var plotSpec = " plot-json ";"
-                   "Plotly.newPlot('plot', plotSpec.data, plotSpec.layout);")]]))
-(comment
-  ;; Example call:
-  (render-result {:data [{:x [1,2,3], :y [4,5,6], :type "scatter"}],
-                  :layout {:title "Line Chart"}}))
-
-(defn render-conversation-history
-  "Renders the conversation history as a collapsible HTML block.
-   
-   Example:
-   (render-conversation-history)"
-  []
-  (let [msgs @conversation]
-    [:details {:open true :style "margin: 1em 0;"}
-     [:summary "Show Conversation History"]
-     (for [{:keys [role content]} msgs]
-       [:div {:style "margin: 0.5em 0; padding: 0.5em; border-bottom: 1px solid #ddd;"}
-        [:strong (str role ": ")]
-        [:span content]])]))
-(comment
-  ;; Example call:
-  (render-conversation-history))
-
-(defn render-conversation-history-component
-  "Renders the conversation history along with a button to refresh it via HTMX.
-   The history is shown in a collapsible block.
-   
-   Example:
-   (render-conversation-history-component)"
-  []
-  (let [history-html (render-conversation-history)]
-    [:div
-     [:h3 "Conversation History"]
-     ;; HTMX refresh button that fetches the conversation history from /history.
-     [:button {:hx-get "/history" :hx-target "#history-div"} "Refresh History"]
-     [:div#history-div history-html]]))
-(comment
-  ;; Example call:
-  (render-conversation-history-component))
-
 ;; -----------------------------------------------------------------------------
 ;; Web Routes and Application
 ;; -----------------------------------------------------------------------------
@@ -363,29 +293,13 @@
 (defroutes app-routes
   (GET "/" []
        (layout "Plotly Plot Generator"
-               (render-initial-form)
-               (render-update-form)
-               [:div#result]
-               (render-conversation-history-component)))
-  (POST "/generate" {params :params}
-        (let [data        (get params "data")
-              instruction (get params "instruction")
-              plot-spec   (generate-initial-plot data instruction)]
-          (layout "Plot Generated"
-                  (render-result plot-spec)
-                  (render-update-form)
-                  (render-conversation-history-component))))
-  (POST "/update" {params :params}
-        (let [instruction (get params "instruction")
-              plot-spec   (update-plot instruction)]
-          (layout "Plot Updated"
-                  (render-result plot-spec)
-                  (render-update-form)
-                  (render-conversation-history-component))))
-  (GET "/history" []
-       ;; Return just the conversation history block.
-       (html5
-        [:body (render-conversation-history)]))
+               (render-command-form)
+               [:div#gallery (render-gallery)]))
+  (POST "/submit" {params :params}
+        (let [command (get params "command")]
+          (process-command command)
+          ;; Return the updated gallery (this will replace the #gallery div via HTMX)
+          (html5 [:body (render-gallery)])))
   (route/not-found "Page not found"))
 (comment
   ;; Example: To test routes directly, start the server and visit http://localhost:3000.
@@ -393,9 +307,7 @@
 
 (def app
   "The Ring application wrapped with parameters middleware.
-   
-   Example:
-   (app)"
+   Example: (app)"
   (wrap-params app-routes))
 (comment
   ;; Example call:
@@ -407,9 +319,7 @@
 
 (defn -main
   "Starts the web server on port 3000.
-   
-   Example:
-   (-main)
+   Example: (-main)
    Then open http://localhost:3000 in your browser."
   [& args]
   (run-jetty app {:port 3000 :join? false}))
